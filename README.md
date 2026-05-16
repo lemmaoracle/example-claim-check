@@ -4,6 +4,8 @@
 
 A reference implementation that demonstrates how to bind an AI-generated verdict to the *specific model that produced it*. If the local model weights are swapped out — even subtly — the cryptographic proof breaks immediately and visibly.
 
+The same primitive runs a **second mode**: attribute attestation for KYC / DeFi compliance. The TUI ships with `--mode attribute` and `--mode both`, so the demo can show *one* hash-compare primitive cover *two* domains — AI trust and verifiable compliance — using the same Lemma BBS+ document-binding flow.
+
 This repository is the public, Apache 2.0 sibling of the longer write-up; see [`docs/writeup.md`](./docs/writeup.md) for the full motivation and the WOW-moment demo script.
 
 ## Architecture
@@ -59,7 +61,9 @@ Paste the `sha256:…` output into `config/known-good-hashes.json` under the mat
 
 ## The WOW demo
 
-The point of this assistant is what happens **when trust breaks**.
+The point of this assistant is what happens **when trust breaks**. The same hash-compare primitive backs two domains, and the WOW moment shows up in both.
+
+### Model attestation (claim mode)
 
 ```bash
 # 1. Run a claim — observe ✔ VERIFIED
@@ -75,7 +79,37 @@ pnpm dev
 pnpm untamper
 ```
 
-The tamper script does not touch the model weights on disk. It writes `.tamper-state.json`, which overrides the expected digest used by the attestation step. The verdict change the user sees is identical to a real supply-chain compromise — the only difference is that no actual model file was harmed.
+### Attribute attestation (KYC / DeFi compliance)
+
+```bash
+# 1. Verify a KYC credential — observe ✔ VERIFIED
+pnpm dev -- --mode attribute
+
+# 2. Simulate an issuer-attestation rotation (flips the expected attribute hash)
+pnpm tamper:attribute
+
+# 3. Re-run — observe ✘ TAMPERED with "Attribute hash mismatch"
+pnpm dev -- --mode attribute
+
+# 4. Restore trust
+pnpm untamper
+```
+
+### Both — one primitive, two domains
+
+```bash
+# Runs the AI pipeline (Attest/Infer/Prove) then the attribute pipeline
+# (AttestAttr/VerifyAttr/ProveAttr) back-to-back, with the banner
+# "Same ZK primitive, different domain — AI trust & DeFi compliance, unified."
+pnpm dev -- --mode both --claim "The Eiffel Tower is in Paris."
+
+# Flip both expectations at once
+pnpm tamper:both
+pnpm dev -- --mode both --claim "<text>"   # both panels go red
+pnpm untamper
+```
+
+The tamper script does not touch any model weights or credentials on disk. It writes `.tamper-state.json`, which overrides the expected digest used by the attestation steps (`expectedDigestOverride` for the model, `attributeHashOverride` for the attribute). The verdict change is identical to a real supply-chain compromise — no actual model file or credential is harmed.
 
 ## Configuration
 
@@ -97,18 +131,21 @@ CLI flags override env vars. See `pnpm dev -- --help` for the full list.
 ```
 example-claim-check/
 ├── src/
-│   ├── sdk/            # Thin Lemma API wrapper (fetch + types only)
-│   ├── ollama/         # Ollama HTTP client (/api/{tags,show,generate})
-│   ├── attestation/    # Model digest readback + known-good comparison
-│   ├── inference/      # Gemma 4 claim-check prompting (JSON output)
-│   ├── proof/          # Payload binding + Lemma submission
-│   ├── ui/             # Ink TUI components
-│   └── cli.tsx         # Entry point
+│   ├── sdk/                # Thin Lemma API wrapper (fetch + types only)
+│   ├── ollama/             # Ollama HTTP client (/api/{tags,show,generate})
+│   ├── attestation/
+│   │   ├── verify.ts       # Model digest readback + known-good comparison
+│   │   └── attribute.ts    # Attribute hash readback + KYC verify
+│   ├── inference/          # Gemma 4 claim-check prompting (JSON output)
+│   ├── proof/              # Payload binding + Lemma submission (claim + attribute)
+│   ├── ui/                 # Ink TUI components
+│   └── cli.tsx             # Entry point — --mode claim | attribute | both
 ├── scripts/
-│   └── tamper.ts       # WOW demo helper
+│   └── tamper.ts           # WOW demo helper — --mode model | attribute | both
 ├── config/
-│   └── known-good-hashes.json
-└── LICENSE             # Apache 2.0
+│   ├── known-good-hashes.json       # Pinned model manifest digests
+│   └── known-good-attributes.json   # Pinned attribute credential hashes
+└── LICENSE                 # Apache 2.0
 ```
 
 ## Cross-references
