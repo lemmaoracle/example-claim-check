@@ -10,7 +10,7 @@
   },
   "scripts": {
     "build": "tsc",
-    "dev": "tsx src/cli.tsx",
+    "dev": "dotenv -- tsx src/cli.tsx",
     "start": "node dist/cli.js",
     "tamper": "tsx scripts/tamper.ts",
     "tamper:attribute": "tsx scripts/tamper.ts --mode attribute",
@@ -28,6 +28,7 @@
   "devDependencies": {
     "@types/node": "^22.10.0",
     "@types/react": "^18.3.12",
+    "dotenv-cli": "^11.0.0",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"
