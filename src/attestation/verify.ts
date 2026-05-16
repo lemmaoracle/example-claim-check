@@ -15,7 +15,7 @@ import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createOllama, show, tags, type OllamaConfig } from "../ollama/index.js";
 import { canonicalize, randomNonce, sha256Prefixed } from "./hash.js";
-import type { AttestationResult, KnownGoodTable } from "./types.js";
+import type { ModelAttestationResult, KnownGoodTable, TamperState } from "./types.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, "..", "..");
@@ -31,15 +31,6 @@ const safeReadJson = async <T>(path: string): Promise<T | null> => {
     return null;
   }
 };
-
-type TamperState = Readonly<{
-  /** Override what the verifier *thinks* the trusted digest is. */
-  expectedDigestOverride?: string;
-  /** When the tamper was applied. */
-  appliedAt?: string;
-  /** Human-readable note for the TUI. */
-  note?: string;
-}>;
 
 const loadKnownGood = async (): Promise<KnownGoodTable | null> =>
   safeReadJson<KnownGoodTable>(KNOWN_GOOD_PATH);
@@ -70,7 +61,7 @@ const digestFromTags = async (ollama: OllamaConfig): Promise<string> => {
 
 export const attestModel = async (
   ollama: OllamaConfig = createOllama(),
-): Promise<AttestationResult> => {
+): Promise<ModelAttestationResult> => {
   const [table, tamper] = await Promise.all([loadKnownGood(), loadTamperState()]);
 
   let observedDigest = "";
@@ -92,6 +83,7 @@ export const attestModel = async (
     }
   } catch (e) {
     return {
+      type: "model",
       verdict: "unknown",
       modelTag: ollama.model,
       observedDigest: "",
@@ -106,6 +98,7 @@ export const attestModel = async (
 
   if (expectedDigest === null) {
     return {
+      type: "model",
       verdict: "unknown",
       modelTag: ollama.model,
       observedDigest,
@@ -125,6 +118,7 @@ export const attestModel = async (
       }),
     );
     return {
+      type: "model",
       verdict: "verified",
       modelTag: ollama.model,
       observedDigest,
@@ -137,6 +131,7 @@ export const attestModel = async (
   }
 
   return {
+    type: "model",
     verdict: "tampered",
     modelTag: ollama.model,
     observedDigest,
