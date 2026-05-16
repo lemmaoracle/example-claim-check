@@ -1,0 +1,17 @@
+{
+  "$comment": "Curated known-good hashes for issued attribute credentials. Each entry binds an attribute key to the canonical hash of the issued credential payload. In a real system these would be derived from BBS+ signed credentials issued by a compliance provider. For the demo, the hashes are the sha256 of the canonical payload returned by `attributeCanonicalPayload(key)` in src/attestation/attribute.ts — so the attribute fixture is deterministic across machines.",
+  "attributes": {
+    "kyc-verified": {
+      "hash": "sha256:5aebbf7f9852290b00bcad9fc2fe853cb0974bb33e256821a0232c427a3b53ca",
+      "label": "KYC Verified (Tier 2)",
+      "issuer": "compliance-provider-A",
+      "expiresAt": "2027-12-31T23:59:59Z"
+    },
+    "accredited-investor": {
+      "hash": "sha256:81f4fed787a199ef69057e9d8b4120e94374b6241cdf0477c3ae5fc136f570eb",
+      "label": "Accredited Investor",
+      "issuer": "compliance-provider-A",
+      "expiresAt": "2027-06-30T23:59:59Z"
+    }
+  }
+}
