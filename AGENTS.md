@@ -22,26 +22,54 @@ call to the Lemma workers API.
 | `pnpm dev`       | Launch the Ink TUI (`tsx src/cli.tsx`)              |
 | `pnpm dev --claim "<text>"` | Run the pipeline non-interactively       |
 | `pnpm dev --offline`        | Skip the Lemma submission step           |
-| `pnpm tamper` / `pnpm untamper` | Apply / restore the WOW-demo tamper  |
+| `pnpm dev -- --mode attribute` | Run the attribute (KYC) flow          |
+| `pnpm dev -- --mode both --claim "<text>"` | Run both flows back-to-back  |
+| `pnpm tamper` / `pnpm untamper` | Apply / restore the WOW-demo tamper (model mode default) |
+| `pnpm tamper:attribute` / `pnpm tamper:both` | Tamper for attribute / both modes |
 | `pnpm typecheck` | `tsc --noEmit`                                      |
 | `pnpm test`      | `vitest run`                                        |
 | `pnpm build`     | `tsc` → `dist/`                                     |
 
 Requires Node ≥ 20, pnpm, and a local Ollama daemon with a pulled Gemma 4 tag.
 
-## Pipeline
+## Pipelines
+
+Two modes, one Lemma endpoint. Selected via `--mode` (default: `claim`).
+
+### Claim mode (default)
 
 ```
 Claim → Attest → Infer → Prove → Verdict
 ```
 
-1. **Attest** (`src/attestation/`) — reads the local model's manifest digest
-   from Ollama `/api/tags` and compares it to `config/known-good-hashes.json`.
+1. **Attest** (`src/attestation/verify.ts`) — reads the local model's manifest
+   digest from Ollama `/api/tags` and compares it to
+   `config/known-good-hashes.json`.
 2. **Infer** (`src/inference/`) — runs Gemma 4 via Ollama `/api/generate`,
    JSON-constrained output.
-3. **Prove** (`src/proof/`) — canonicalises a binding payload (model digest +
-   claim + output + nonce + timestamp), hashes it, and registers it as a Lemma
-   document via `POST /v1/documents`.
+3. **Prove** (`src/proof/submitToLemma`) — canonicalises a binding payload
+   (model digest + claim + output + nonce + timestamp), hashes it, and
+   registers it as a Lemma document via `POST /v1/documents`.
+
+### Attribute mode (`--mode attribute`)
+
+```
+AttestAttr → VerifyAttr → ProveAttr → Verdict
+```
+
+1. **AttestAttr** (`src/attestation/attribute.ts`) — hashes the canonical
+   credential payload for the attribute key and compares it to
+   `config/known-good-attributes.json`. Ollama / Gemma 4 are **not** used.
+2. **VerifyAttr** — checks `expiresAt` from the pinned entry (and would walk
+   a revocation list in a real implementation; out of scope here).
+3. **ProveAttr** (`src/proof/submitAttributeToLemma`) — same canonical-hash
+   binding as claim mode, registered with schema `attribute-check.v1`.
+
+### Both mode (`--mode both`)
+
+Runs claim mode, then attribute mode, then renders the banner
+`Same ZK primitive, different domain — AI trust & DeFi compliance, unified.`
+between the two result panels.
 
 ## Module map
 
@@ -50,12 +78,15 @@ Claim → Attest → Infer → Prove → Verdict
 | `src/cli.tsx`       | Entry point. Imperative arg parsing (FP-exempt).      |
 | `src/ui/`           | Ink TUI components.                                   |
 | `src/ollama/`       | Ollama HTTP client — `/api/{tags,show,generate}`.     |
-| `src/attestation/`  | Digest readback + known-good comparison + tamper state.|
+| `src/attestation/verify.ts`    | Model digest readback + known-good comparison. |
+| `src/attestation/attribute.ts` | Attribute hash readback + verify (KYC mode). No Ollama. |
+| `src/attestation/types.ts`     | Discriminated union `AttestationResult = Model | Attribute`. |
 | `src/inference/`    | Gemma 4 claim-check prompting.                        |
-| `src/proof/`        | Payload binding + Lemma document registration.        |
+| `src/proof/`        | Payload binding + Lemma document registration (both modes). |
 | `src/sdk/`          | Thin Lemma API wrapper (fetch + types only).          |
-| `scripts/tamper.ts` | WOW-demo helper — writes `.tamper-state.json`.        |
+| `scripts/tamper.ts` | WOW-demo helper — writes `.tamper-state.json` with `expectedDigestOverride` and/or `attributeHashOverride`. |
 | `config/known-good-hashes.json` | Pinned model manifest digests.            |
+| `config/known-good-attributes.json` | Pinned attribute credential hashes.   |
 
 ## Lemma API contract
 
@@ -70,6 +101,10 @@ The Lemma workers API is the SSoT for request shapes — see
 - `POST /v1/proofs` requires a **registered ZK circuit** and a real proof, and
   verification is asynchronous. It is **out of scope** for this demo — the Prove
   step only registers the binding as a document.
+- Claim mode uses `schema: "claim-check.v1"`; attribute mode uses
+  `schema: "attribute-check.v1"`. Both flows go through
+  `registerBinding()` in `src/proof/index.ts` and produce identical document
+  shapes (only `schema`, `subjectId`, and `commitments.leaves` differ).
 - Base URL defaults to the public deployment (`https://workers.lemma.workers.dev`).
   Override with `LEMMA_API_BASE`. The Prove step needs `LEMMA_API_KEY`; without
   it, Attest and Infer still run and Prove reports a 401.
@@ -95,3 +130,6 @@ The Lemma workers API is the SSoT for request shapes — see
 - On-device ZK proving — not implemented; proofs are delegated to Lemma.
 - Training-data provenance — attestation covers weight integrity only.
 - Source/corpus verification.
+- Revocation lists for attribute mode — `verifyAttribute()` only checks
+  `expiresAt`. A production implementation would walk the issuer's revocation
+  registry; the demo skips it.

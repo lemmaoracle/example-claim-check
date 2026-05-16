@@ -13,6 +13,8 @@
     "dev": "tsx src/cli.tsx",
     "start": "node dist/cli.js",
     "tamper": "tsx scripts/tamper.ts",
+    "tamper:attribute": "tsx scripts/tamper.ts --mode attribute",
+    "tamper:both": "tsx scripts/tamper.ts --mode both",
     "untamper": "tsx scripts/tamper.ts --restore",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
