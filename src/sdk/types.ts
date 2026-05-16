@@ -1,0 +1,66 @@
+/**
+ * Lemma API thin wrapper — public types.
+ *
+ * These mirror the request/response shapes of the Lemma workers REST API
+ * (see lemma/packages/spec/openapi.lemma.v2.json and workers/src/routes).
+ * They are kept intentionally minimal: the demo only depends on what it
+ * actually sends over the wire, and does not import @lemmaoracle/sdk.
+ */
+
+export type ClientConfig = Readonly<{
+  apiBase: string;
+  apiKey?: string;
+  fetcher?: typeof fetch;
+}>;
+
+export type LemmaClient = Readonly<ClientConfig>;
+
+/**
+ * Commitment block of a Lemma document. `scheme` must be one of the schemes
+ * the workers API accepts; this demo binds a SHA-256 payload hash, so it uses
+ * `sha256-placeholder`.
+ */
+export type DocumentCommitments = Readonly<{
+  scheme: "sha256-placeholder" | "poseidon" | "poseidon2" | "rescue-prime";
+  /** Commitment root — the canonical payload hash for this demo. */
+  root: string;
+  /** Per-leaf commitments bound under the root. */
+  leaves?: ReadonlyArray<string>;
+  /** Optional blinding randomness. */
+  randomness?: string;
+}>;
+
+/**
+ * POST /v1/documents request body. The scope is derived server-side from the
+ * API key, so it is not part of the request body.
+ */
+export type RegisterDocumentRequest = Readonly<{
+  /** Hash that uniquely identifies the document. */
+  docHash: string;
+  /** Issuer-defined schema identifier. */
+  schema: string;
+  /** Content identifier for the document payload. */
+  cid: string;
+  /** Identifier of the party that issued the document. */
+  issuerId: string;
+  /** Identifier of the subject the document is about. */
+  subjectId: string;
+  commitments: DocumentCommitments;
+  /** Revocation block — an empty object opts out of revocation. */
+  revocation: Readonly<Record<string, string>>;
+}>;
+
+/** POST /v1/documents response body. */
+export type RegisterDocumentResponse = Readonly<{
+  status: string;
+  docHash: string;
+  hooksQueued?: number;
+  onchainTxHash?: string;
+  onchainWarning?: string;
+  hookQueueWarning?: string;
+}>;
+
+/** GET /v1/health response body. */
+export type HealthResponse = Readonly<{
+  ok: boolean;
+}>;
