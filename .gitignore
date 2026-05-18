@@ -7,3 +7,4 @@ dist/
 coverage/
 .tamper-state.json
 build/
+docs/demo-audio/

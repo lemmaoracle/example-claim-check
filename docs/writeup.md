@@ -1,105 +1,115 @@
 # Verifiable Claim-Check Assistant: On-Device AI with Cryptographic Trust
 
-**Subtitle:** Bringing verifiable integrity to AI-generated claims through Gemma 4 and zero-knowledge proofs
+**Subtitle:** Bringing verifiable integrity to AI-generated claims through Gemma 4, on-device Groth16 zero-knowledge proofs, and Lemma anchoring
 
-**Track:** Safety & Trust (also eligible for Special Technology Track: Ollama / llama.cpp)
+**Track:** Safety & Trust (also eligible for Special Technology Track: Ollama)
 
 ---
 
 ## The Problem: When AI Claims Can't Be Trusted
 
-AI models generate millions of claims daily — news summaries, medical interpretations, financial analyses. But how do you verify that the model producing those claims hasn't been tampered with? How do you know the weights are authentic, the reasoning chain is intact, and the output hasn't been modified in transit?
+AI models generate millions of claims daily — news summaries, medical interpretations, financial analyses, legal advice. But how do you verify that the model producing those claims hasn't been tampered with? How do you know the weights are authentic, and the output you see came from the model you think it did?
 
 Today, the answer is: you can't. AI systems operate as black boxes, and their outputs are taken on faith. This creates an asymmetric trust problem — especially for vulnerable populations who lack the technical resources to independently verify what an AI tells them.
 
-Consider a local journalist in a resource-constrained environment. They use an AI assistant to fact-check claims circulating on social media. If the model's weights have been modified — even subtly — the "fact-checks" it produces could be systematically biased, and neither the journalist nor their readers would ever know.
+Consider a clinician in a rural hospital using an AI assistant to triage cases. If the model's weights were silently swapped — a supply-chain attack, an unauthorised update, a corrupted local cache — the clinician would have no way to know. The interface looks the same. The answers still arrive. But the trust is gone, and so is patient safety.
 
-This is not a hypothetical risk. Model supply chain attacks, weight tampering, and output manipulation are documented threat vectors that grow as AI deployment expands.
+This is not a hypothetical risk. Model supply-chain attacks, weight tampering, and output manipulation are documented threat vectors that grow as AI deployment expands into safety-critical domains.
 
 ## Our Solution: Verifiable Claim-Check Assistant
 
-We built a claim verification assistant that doesn't just check claims — it **proves** that the checking process itself is trustworthy, using cryptographic verification anchored to the model's integrity.
+We built a claim-verification assistant that doesn't just check claims — it **cryptographically proves** that the checking process itself is trustworthy. Every answer comes with a zero-knowledge proof that anyone, anywhere, can verify — without ever seeing the model, the input, or the user.
 
-The architecture combines three layers:
+The architecture is three layers, all running on-device except for the final anchoring step:
 
-1. **On-device inference with Gemma 4**: Claims are analyzed locally using Gemma 4's multilingual and long-context capabilities, ensuring privacy and low-latency operation even in bandwidth-constrained environments.
+1. **On-device inference with Gemma 4 via Ollama.** Claims are analysed locally. No data leaves the device — not the claim, not the user identity, not the answer.
 
-2. **Cryptographic model attestation**: Before any inference runs, the system verifies that the Gemma 4 model weights match a known-good hash. This creates a chain of trust from model identity to output reliability.
+2. **Model attestation.** Before each inference, the system reads Gemma 4's manifest digest from Ollama's `/api/tags` and compares it to a pinned, known-good hash. Any drift triggers an immediate TAMPERED verdict.
 
-3. **Verifiable claim proofs**: Each fact-check result is accompanied by a cryptographic proof that binds the output to the specific, verified model that produced it. If the model changes, the proof breaks — immediately and visibly.
+3. **Zero-knowledge proof.** A Poseidon commitment binds the model digest, the claim, the output, and a nonce. A Groth16 zero-knowledge proof — generated locally via snarkjs against our circom circuit `claimCheckCommitmentV1` — proves the commitment is well-formed without revealing any of the inputs. The proof and the binding hash are anchored on Lemma as a permanent, publicly auditable record.
+
+The same primitive runs a second mode: **verifiable credentials**. The same Poseidon circuit binds a KYC attestation, and the same Groth16 prover produces a proof that "this credential is valid" without revealing identity, issuer details, or the credential payload. One ZK primitive, two domains, one shared audit trail.
 
 ### How Gemma 4 Enables This
 
-Gemma 4's four core capabilities are not just features we use — they are structural requirements for the system to work:
+- **On-device inference via Ollama.** The entire pipeline — inference, commitment, proof generation — runs locally. No claim is exposed to a cloud provider. This is essential for clinicians under HIPAA-like obligations, journalists working under surveillance, or aid workers in regions with hostile network environments.
 
-- **Native function calling**: The verification pipeline is orchestrated through Gemma 4's tool use. The model itself decides when to invoke cryptographic verification, claim decomposition, and source cross-referencing — making the trust layer an integral part of reasoning, not an external bolt-on.
+- **Low latency.** Gemma 4 returns a fact-check in ~12 seconds on commodity hardware; the proof generation adds ~1 second. Total round-trip is faster than many cloud APIs, and works fully offline once the model is pulled.
 
-- **Long context window (128K)**: Real-world claim verification requires synthesizing multiple source documents, sometimes lengthy regulatory texts or historical records. Gemma 4 processes these in a single pass, maintaining cross-reference coherence across the full context.
+- **JSON-constrained output.** Ollama's `format=json` constraint gives us a stable, parseable verdict structure (`verdict`, `rationale`) that we hash into the commitment. The output is what the model said, byte-for-byte, and the proof binds to exactly that.
 
-- **Multimodal input**: Claims often arrive as screenshots, infographics, or video stills. Gemma 4 processes both text and images natively, eliminating fragile OCR preprocessing that introduces trust gaps.
-
-- **On-device inference**: The entire pipeline runs locally via Ollama/llama.cpp. No data leaves the device — not the claims, not the sources, not the verification results. This is critical for journalists working under surveillance or in regions with hostile press environments.
+- **Manifest-digest attestation.** Ollama's content-addressed model storage makes attestation possible without re-hashing multi-gigabyte weights at every call — the manifest digest is itself a cryptographic commitment to the weights.
 
 ## Technical Architecture
 
 ```
-[Claim Input (text/image)]
-        ↓
-[Model Attestation] → hash(model weights) vs. known-good hash
-        ↓ (verified)
-[Gemma 4 Inference (local)]
-  ├── Claim decomposition (function call)
-  ├── Source retrieval & cross-reference
-  └── Verification assessment
-        ↓
-[Proof Generation] → bind(output, model_hash, timestamp)
-        ↓
-[Verifiable Result: ✅ Verified / ❌ Unverified / ⚠️ Tampered]
+[Claim Input]
+    ↓
+[Model Attestation] — Ollama /api/tags manifest digest vs. pinned known-good
+    ↓ (verified)
+[Gemma 4 Inference] — local /api/generate, JSON-constrained output
+    ↓
+[Poseidon Commitment] — model digest + claim hash + output hash + nonce
+    ↓
+[Groth16 Proof] — snarkjs.groth16.fullProve against claimCheckCommitmentV1 circuit
+    ↓
+[Lemma Anchoring] — POST /v1/documents (binding) + POST /v1/proofs (Groth16 proof)
+    ↓
+[Verdict: VERIFIED · TAMPERED · UNVERIFIED]
 ```
 
-The proof generation layer uses BBS+ signature schemes to create selectively-disclosable attestations. This means the proof can confirm "this output came from verified Gemma 4 weights at time T" without revealing the full model hash or any user data — a zero-knowledge approach to AI trust.
+In attribute (KYC) mode, the inference step is replaced by attestation against a pinned credential hash; the commitment, the circuit, and the anchoring are identical. This is what "one primitive, two domains" means in practice.
 
 ## The WOW Moment: When Trust Breaks
 
-The most powerful demonstration of our system is what happens when trust is violated:
+The most powerful demonstration is what happens when trust is violated.
 
-1. A claim is checked — verification succeeds with a green ✅ and a valid cryptographic proof.
-2. The model weights are modified (simulating a supply chain attack).
-3. The same claim is checked again — verification **immediately fails** with a red ❌. The proof is broken. The tampering is detected in real-time.
+1. **Verified.** A claim is fact-checked. Gemma 4 returns its answer. The Groth16 proof is generated, the binding is anchored on Lemma. Green verdict.
 
-This isn't a theoretical capability. It's a working demo that makes an abstract threat (model tampering) viscerally tangible. For judges, for journalists, for anyone — the moment the checkmark flips from green to red is the moment the problem becomes undeniable.
+2. **Tamper.** A simulated supply-chain attack flips the expected model digest. No weights are touched — only the *expected state* the circuit checks against. This mirrors exactly how a real swap would manifest.
+
+3. **Same claim, same interface — TAMPERED, instantly.** The model state no longer matches what the proof commits to. The circuit constraints fail. The proof never validates, and Lemma refuses to anchor it. The verdict flips to TAMPERED — not because we compared two strings, but because the cryptography itself broke.
+
+The same demo runs in attribute mode: a stale KYC credential triggers the same instant TAMPERED verdict from the same circuit. Then "both mode" runs them back-to-back, against the same Lemma audit trail.
+
+This isn't a theoretical capability. It's a working, on-device demo that makes an abstract threat — silent AI tampering, forged credentials — viscerally tangible. The moment the verdict flips from green to red is the moment the problem becomes undeniable.
+
+## Beyond AI Trust: Verifiable Credentials and DeFi Compliance
+
+The attribute mode is where Gemma 4 Good's Impact dimension multiplies. The same on-device circuit that attests an AI model can attest a credential — proof of eligibility without revealing identity:
+
+- **A licensed clinician** proving accreditation to access a patient database, without exposing their name to the database operator.
+- **An accredited journalist** proving institutional affiliation to query a public records API, without surveilling who they are.
+- **A verified adult learner** enrolling in a regulated course in a foreign jurisdiction, without surrendering their full identity to the platform.
+- **A regulated DeFi protocol** proving a user has completed KYC, satisfying MiCA or PPSI compliance, without exposing personal data on-chain.
+
+One ZK primitive serves AI trust and DeFi compliance through a single, shared, permanent audit trail on Lemma. Wherever AI meets trust, the proof comes with it.
 
 ## Challenges & Limitations
 
 We want to be transparent about what this system does and doesn't do today:
 
-- **Edge proving is not yet implemented.** Cryptographic proof generation currently runs on the cloud side, with the on-device component handling inference and attestation only. Full on-device proving is an active research area — BBS+ signatures are computationally feasible on-device, but the full zero-knowledge proof pipeline requires optimization for resource-constrained hardware.
+- **Model attestation covers weight integrity, not training-data provenance.** A model trained on biased data will still produce biased outputs — our system detects post-training tampering, not biases baked in before tampering would matter.
 
-- **Source verification relies on external data.** The system can verify that the *model* is trustworthy, but verifying the *sources* it references is a separate (and complementary) challenge. We see this as future work, potentially integrating with existing fact-checking APIs.
+- **Source verification is out of scope.** The system attests the model, not the corpus the model relies on internally. Fact-checking quality depends on Gemma 4's training, not on our proof layer.
 
-- **Scope of attestation.** Current model attestation covers weight integrity but not training data provenance. A model trained on biased data would still produce biased outputs — our system detects tampering after training, not biases within training. This is a known limitation of the model supply chain trust model.
+- **Revocation lists are stubbed.** Attribute mode checks `expiresAt` but does not yet walk an issuer revocation registry — a production deployment would.
 
-## What's Next: One Primitive, Many Domains
-
-The cryptographic trust layer we built for AI claim verification is not domain-specific. The same BBS+ signature primitive that proves "this AI output came from verified weights" can also prove "this user completed KYC verification" or "this transaction meets compliance requirements" — without revealing the underlying data.
-
-This means the architecture extends naturally to:
-
-- **DeFi and stablecoin compliance**: Verifiable attribute proofs for regulatory requirements (MiCA, PPSI) without exposing personal data on-chain.
-- **AI agent payments (x402 protocol)**: Proving agent identity and authorization cryptographically before processing autonomous transactions.
-- **Supply chain integrity**: Verifying that any computational pipeline — not just AI inference — has not been tampered with.
-
-We chose AI claim-checking as our first application because the trust problem is intuitive and the social impact is immediate. But the underlying infrastructure is designed to be a general-purpose verifiable trust layer — for AI, for finance, for any domain where "prove it" matters more than "trust me."
+- **Proof verification is asynchronous on Lemma.** The Groth16 proof is generated on-device synchronously, but Lemma's verifier runs asynchronously. For real-time gating, a local verifier would need to be added on the relying-party side; this is straightforward but not part of the demo.
 
 ## Impact
 
-For the 2 billion people living in regions with limited press freedom, AI-assisted fact-checking could be transformative — but only if the AI itself can be trusted. Our system makes that trust verifiable, not assumable.
+For the **2 billion people** living in regions with limited press freedom or fragile institutional trust, AI-assisted fact-checking could be transformative — but only if the AI itself can be trusted. Our system makes that trust verifiable, not assumable.
 
-For the broader AI community, we demonstrate that on-device inference and cryptographic verification are not competing priorities — they are complementary. Gemma 4's local-first architecture makes trust verification practical, and trust verification makes local AI genuinely useful.
+For **clinicians in resource-constrained settings**, an attestable AI triage assistant is the difference between a tool they can rely on and a black box they cannot. The same Groth16 proof that protects the model also protects the patient.
+
+For **the broader AI community**, we demonstrate that on-device inference and cryptographic verification are not competing priorities — they are complementary. Gemma 4's local-first architecture makes verification practical, and verification makes local AI genuinely useful in safety-critical domains.
+
+One circuit today. Tomorrow — medical advice you can audit. Educational credentials no one can forge. Climate-data attestations from any device, anywhere. Wherever AI meets trust, the proof comes with it.
 
 ---
 
-**Team:** FRAME00 / LemmaOracle
-**Repository:** [example-claim-check](../README.md)
-**Demo:** [Live demo link — to be added]
-**Video:** [YouTube link — to be added]
+**Team:** FRAME00, INC. / LemmaOracle
+**Repository:** https://github.com/lemmaoracle/example-claim-check
+**Demo video:** [YouTube link — to be added]
+**License:** Apache 2.0

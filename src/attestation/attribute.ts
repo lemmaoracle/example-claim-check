@@ -5,7 +5,7 @@
  * cover an entirely different domain (KYC / DeFi compliance):
  *
  *   1. Build a canonical payload for the attribute key (the credential the
- *      holder would present in a real BBS+ flow).
+ *      holder would present in a real ZK credential flow).
  *   2. Hash the payload — that's the observed digest.
  *   3. Load the pinned known-good hash from config/known-good-attributes.json.
  *   4. Apply any tamper-state override (used by the WOW demo to flip the
@@ -48,9 +48,10 @@ const loadTamperState = async (): Promise<TamperState | null> =>
 
 /**
  * Canonical payload for an attribute credential. In a real system this would
- * be the BBS+-signed VC the holder presents; for the demo we deterministically
- * derive a stable payload from the attribute key + a fixed demo subject so
- * the hash is reproducible across machines.
+ * be a signed verifiable credential the holder presents (e.g. BBS+ for
+ * selective disclosure, or another ZK-friendly scheme); for the demo we
+ * deterministically derive a stable payload from the attribute key + a fixed
+ * demo subject so the hash is reproducible across machines.
  *
  * Exposed for tooling that needs to recompute pinned hashes (e.g. tests, or
  * an operator updating `config/known-good-attributes.json`).

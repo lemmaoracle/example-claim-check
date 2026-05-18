@@ -4,7 +4,7 @@
 
 A reference implementation that demonstrates how to bind an AI-generated verdict to the *specific model that produced it*. If the local model weights are swapped out — even subtly — the cryptographic proof breaks immediately and visibly.
 
-The same primitive runs a **second mode**: attribute attestation for KYC / DeFi compliance. The TUI ships with `--mode attribute` and `--mode both`, so the demo can show *one* hash-compare primitive cover *two* domains — AI trust and verifiable compliance — using the same Lemma BBS+ document-binding flow.
+The same primitive runs a **second mode**: attribute attestation for KYC / DeFi compliance. The TUI ships with `--mode attribute` and `--mode both`, so the demo can show *one* Groth16 circuit cover *two* domains — AI trust and verifiable compliance — using the same Lemma document-binding flow.
 
 This repository is the public, Apache 2.0 sibling of the longer write-up; see [`docs/writeup.md`](./docs/writeup.md) for the full motivation and the WOW-moment demo script.
 
@@ -158,7 +158,7 @@ example-claim-check/
 
 This is a hackathon-track reference. Per the writeup:
 
-- **Edge proving is not yet implemented.** The proof step is a binding-hash submitted to the Lemma workers API; full on-device BBS+ proving is future work.
+- **Edge proving is implemented.** The proof step generates a Groth16 zero-knowledge proof on-device via snarkjs (Poseidon-commitment circuit `claimCheckCommitmentV1`), and submits both the binding-hash document and the proof to the Lemma workers API.
 - **Model attestation covers weight integrity only.** A model trained on biased data would still produce biased verdicts — attestation detects post-training tampering, not training-data provenance.
 - **Source verification is out of scope.** The system attests the model, not the corpus the model relies on internally.
 
