@@ -34,7 +34,7 @@ The same primitive runs a second mode: **verifiable credentials**. The same Pose
 
 - **On-device inference via Ollama.** The entire pipeline — inference, commitment, proof generation — runs locally. No claim is exposed to a cloud provider. This is essential for clinicians under HIPAA-like obligations, journalists working under surveillance, or aid workers in regions with hostile network environments.
 
-- **Low latency.** Gemma 4 returns a fact-check in ~12 seconds on commodity hardware; the proof generation adds ~1 second. Total round-trip is faster than many cloud APIs, and works fully offline once the model is pulled.
+- **Low latency.** Gemma 4 returns a fact-check in seconds on commodity hardware; the proof generation adds a small constant overhead. Total round-trip is comparable to or faster than many cloud APIs, and works fully offline once the model is pulled.
 
 - **JSON-constrained output.** Ollama's `format=json` constraint gives us a stable, parseable verdict structure (`verdict`, `rationale`) that we hash into the commitment. The output is what the model said, byte-for-byte, and the proof binds to exactly that.
 
