@@ -24,6 +24,10 @@ This repository is the public, Apache 2.0 sibling of the longer write-up; see [`
 [Verdict] — ✔ VERIFIED · ✘ TAMPERED · ! UNVERIFIED
 ```
 
+## Demo Video
+
+<iframe width="560" height="315" src="https://www.youtube.com/embed/c-i8EWVssYM?si=3GZIs2zb0qS6aD-s" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
+
 The core is **external-API-only**: it does not depend on `@lemmaoracle/sdk` or any cryptographic primitive package. All proof-side work is delegated to the Lemma workers API. The on-device pipeline only handles:
 
 - model digest readback from Ollama,
