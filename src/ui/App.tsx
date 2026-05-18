@@ -311,8 +311,8 @@ export const App: React.FC<Props> = ({
   };
 
   const subtitleByMode: Record<Mode, string> = {
-    claim: " · Gemma 4 + Lemma BBS+ attestation",
-    attribute: " · KYC / DeFi compliance via Lemma BBS+ attribute proofs",
+    claim: " · Gemma 4 + Lemma Groth16 attestation",
+    attribute: " · KYC / DeFi compliance via Lemma Groth16 attribute proofs",
     both: " · One ZK primitive — AI trust + DeFi compliance",
   };
 
