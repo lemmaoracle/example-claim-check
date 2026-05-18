@@ -23,14 +23,20 @@
     "ink": "^5.0.1",
     "ink-spinner": "^5.0.0",
     "ink-text-input": "^6.0.0",
-    "react": "^18.3.1"
+    "poseidon-lite": "^0.3.0",
+    "react": "^18.3.1",
+    "snarkjs": "^0.7.6"
   },
   "devDependencies": {
+    "@lemmaoracle/sdk": "^0.0.31",
+    "@lemmaoracle/spec": "^0.0.30",
     "@types/node": "^22.10.0",
     "@types/react": "^18.3.12",
+    "dotenv": "^17.4.2",
     "dotenv-cli": "^11.0.0",
-    "tsx": "^4.19.2",
-    "typescript": "^5.7.2",
+    "ts-node": "^10.9.2",
+    "tsx": "^4.22.0",
+    "typescript": "^5.9.3",
     "vitest": "^2.1.8"
   },
   "engines": {

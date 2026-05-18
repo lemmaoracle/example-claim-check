@@ -15,7 +15,9 @@
  */
 import { canonicalize, randomNonce, sha256Hex, sha256Prefixed } from "../attestation/hash.js";
 import { subjectIdOf } from "../attestation/types.js";
-import { registerDocument, type LemmaClient } from "../sdk/index.js";
+import { registerDocument, submitProof, type LemmaClient } from "../sdk/index.js";
+import { toScalar } from "@lemmaoracle/sdk";
+import { poseidon5 } from "poseidon-lite";
 import type { InferenceResult } from "../inference/index.js";
 import type {
   AttestationResult,
@@ -57,8 +59,8 @@ export type AttributeProofSubmission = Readonly<{
   reason: string;
 }>;
 
-const CLAIM_SCHEMA_ID = "claim-check.v1";
-const ATTRIBUTE_SCHEMA_ID = "attribute-check.v1";
+const CLAIM_SCHEMA_ID = "passthrough-v1";
+const ATTRIBUTE_SCHEMA_ID = "passthrough-v1";
 const ISSUER_ID = "example-claim-check";
 
 export const buildBinding = (
@@ -66,22 +68,23 @@ export const buildBinding = (
   claim: string,
   inference: InferenceResult,
 ): ProofBinding => {
-  const claimHash = sha256Hex(claim);
-  const outputHash = sha256Hex(
-    canonicalize({ verdict: inference.verdict, rationale: inference.rationale }),
-  );
+  const claimHashScalar = toScalar(claim);
+  const claimHash = claimHashScalar.toString();
+  const outputHashScalar = toScalar(canonicalize({ verdict: inference.verdict, rationale: inference.rationale }));
+  const outputHash = outputHashScalar.toString();
   const nonce = randomNonce();
   const timestamp = new Date().toISOString();
-  const payload = canonicalize({
-    modelDigest: attestation.observedDigest,
-    attestationToken: attestation.attestationToken,
-    claimHash,
-    outputHash,
-    nonce,
-    timestamp,
-  });
+
+  const payloadHash = poseidon5([
+    toScalar(attestation.observedDigest),
+    toScalar(attestation.attestationToken || ""),
+    claimHashScalar,
+    outputHashScalar,
+    toScalar(nonce),
+  ]).toString();
+
   return {
-    payloadHash: sha256Prefixed(payload),
+    payloadHash,
     modelDigest: attestation.observedDigest,
     claimHash,
     outputHash,
@@ -95,16 +98,17 @@ export const buildAttributeBinding = (
 ): AttributeProofBinding => {
   const nonce = randomNonce();
   const timestamp = new Date().toISOString();
-  const payload = canonicalize({
-    attributeKey: attestation.attributeKey,
-    attributeDigest: attestation.observedDigest,
-    attestationToken: attestation.attestationToken,
-    issuer: attestation.issuer,
-    nonce,
-    timestamp,
-  });
+
+  const payloadHash = poseidon5([
+    toScalar(attestation.attributeKey),
+    toScalar(attestation.observedDigest),
+    toScalar(attestation.attestationToken || ""),
+    toScalar(attestation.issuer),
+    toScalar(nonce),
+  ]).toString();
+
   return {
-    payloadHash: sha256Prefixed(payload),
+    payloadHash,
     attributeKey: attestation.attributeKey,
     attributeDigest: attestation.observedDigest,
     nonce,
@@ -129,7 +133,7 @@ const registerBinding = async (
     issuerId: ISSUER_ID,
     subjectId: args.subjectId,
     commitments: {
-      scheme: "sha256-placeholder",
+      scheme: "poseidon",
       root: args.payloadHash,
       leaves: args.leaves,
     },
@@ -157,8 +161,42 @@ export const submitToLemma = async (
     schema: CLAIM_SCHEMA_ID,
     subjectId: subjectIdOf(attestation),
     payloadHash: binding.payloadHash,
-    leaves: [binding.modelDigest, binding.claimHash, binding.outputHash],
+    leaves: [toScalar(binding.modelDigest).toString(), binding.claimHash, binding.outputHash],
   });
+  
+  if (reg.registered) {
+    const witness = {
+      modelDigest: toScalar(binding.modelDigest).toString(),
+      attestationToken: toScalar(attestation.attestationToken || "").toString(),
+      claimHash: binding.claimHash,
+      outputHash: binding.outputHash,
+      nonce: toScalar(binding.nonce).toString(),
+      claimedRoot: binding.payloadHash,
+      timestampMin: "0",
+      timestampMax: "0",
+    };
+
+    // Generate actual ZK proof with snarkjs
+    try {
+      const snarkjs = await import("snarkjs" as any);
+      const { resolve } = await import("node:path");
+
+      const wasmPath = resolve(process.cwd(), "circuits/build/claimCheckCommitmentV1_js/claimCheckCommitmentV1.wasm");
+      const zkeyPath = resolve(process.cwd(), "circuits/build/claimCheckCommitmentV1_final.zkey");
+
+      const { proof, publicSignals } = await snarkjs.groth16.fullProve(witness, wasmPath, zkeyPath);
+
+      await submitProof(client, {
+        docHash: binding.payloadHash,
+        circuitId: "claim-check-commitment-v1",
+        proof: Buffer.from(JSON.stringify(proof)).toString("base64"),
+        inputs: publicSignals,
+      });
+    } catch (e) {
+      console.warn("Failed to submit proof:", e);
+    }
+  }
+
   return { binding, ...reg };
 };
 
@@ -168,15 +206,48 @@ export const submitAttributeToLemma = async (
   verify: AttributeVerifyResult,
 ): Promise<AttributeProofSubmission> => {
   const binding = buildAttributeBinding(attestation);
-  const validityLeaf = sha256Hex(
+  const validityLeaf = toScalar(
     canonicalize({ ok: verify.ok, expiresAt: verify.expiresAt }),
-  );
+  ).toString();
   const reg = await registerBinding(client, {
     schema: ATTRIBUTE_SCHEMA_ID,
     subjectId: subjectIdOf(attestation),
     payloadHash: binding.payloadHash,
-    leaves: [binding.attributeDigest, validityLeaf],
+    leaves: [toScalar(binding.attributeDigest).toString(), validityLeaf],
   });
+  
+  if (reg.registered) {
+    const witness = {
+      modelDigest: toScalar(binding.attributeKey).toString(),
+      attestationToken: toScalar(attestation.observedDigest).toString(),
+      claimHash: toScalar(attestation.attestationToken || "").toString(),
+      outputHash: toScalar(attestation.issuer).toString(),
+      nonce: toScalar(binding.nonce).toString(),
+      claimedRoot: binding.payloadHash,
+      timestampMin: "0",
+      timestampMax: "0",
+    };
+
+    try {
+      const snarkjs = await import("snarkjs" as any);
+      const { resolve } = await import("node:path");
+
+      const wasmPath = resolve(process.cwd(), "circuits/build/claimCheckCommitmentV1_js/claimCheckCommitmentV1.wasm");
+      const zkeyPath = resolve(process.cwd(), "circuits/build/claimCheckCommitmentV1_final.zkey");
+
+      const { proof, publicSignals } = await snarkjs.groth16.fullProve(witness, wasmPath, zkeyPath);
+
+      await submitProof(client, {
+        docHash: binding.payloadHash,
+        circuitId: "claim-check-commitment-v1",
+        proof: Buffer.from(JSON.stringify(proof)).toString("base64"),
+        inputs: publicSignals,
+      });
+    } catch (e) {
+      console.warn("Failed to submit attribute proof:", e);
+    }
+  }
+  
   return { binding, ...reg };
 };
 
