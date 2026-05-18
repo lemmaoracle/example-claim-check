@@ -7,7 +7,7 @@
  * registered ZK circuit and a real proof, and is out of scope for this demo —
  * see docs/writeup.md ("Edge proving is not yet implemented").
  */
-export { createClient, registerDocument, health } from "./client.js";
+export { createClient, registerDocument, submitProof, health } from "./client.js";
 export type {
   ClientConfig,
   LemmaClient,
@@ -16,3 +16,7 @@ export type {
   RegisterDocumentResponse,
   HealthResponse,
 } from "./types.js";
+export type {
+  SubmitProofRequest,
+  SubmitProofResponse,
+} from "./client.js";

@@ -30,5 +30,24 @@ export const registerDocument = (
 ): Promise<RegisterDocumentResponse> =>
   post<RegisterDocumentResponse>(client)("/v1/documents")(payload);
 
+// TODO: Type this properly using spec types if possible, or define SubmitProofRequest locally
+export type SubmitProofRequest = Readonly<{
+  docHash: string;
+  circuitId: string;
+  proof: string;
+  inputs: ReadonlyArray<string>;
+}>;
+
+export type SubmitProofResponse = Readonly<{
+  status: "received" | "verified" | "onchain-verified" | "rejected";
+  verificationId: string;
+}>;
+
+export const submitProof = (
+  client: LemmaClient,
+  payload: SubmitProofRequest,
+): Promise<SubmitProofResponse> =>
+  post<SubmitProofResponse>(client)("/v1/proofs")(payload);
+
 export const health = (client: LemmaClient): Promise<HealthResponse> =>
   get<HealthResponse>(client)("/v1/health")();
