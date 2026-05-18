@@ -5,13 +5,12 @@
  *   - submitToLemma          — claim-check mode (model attestation + inference)
  *   - submitAttributeToLemma — attribute mode  (KYC / DeFi compliance)
  *
- * Both canonicalise a small payload that commits to the attestation digest,
- * the relevant domain-specific hash, a nonce, and a UTC timestamp; both hash
- * the canonical payload and register the result as a Lemma document via
- * POST /v1/documents. Per the writeup's "Edge proving is not yet implemented"
- * disclosure, the client performs only the binding hash and document
- * registration; full circuit proof generation is delegated to Lemma and is
- * out of scope for this reference implementation.
+ * Both build a Poseidon commitment root (`poseidon5`) over the attestation
+ * digest, domain-specific hashes, and a nonce; generate a Groth16 zero-knowledge
+ * proof on-device via snarkjs (circuit `claimCheckCommitmentV1`); register the
+ * binding as a Lemma document via `POST /v1/documents`; and submit the proof
+ * via `POST /v1/proofs`. If the compiled circuit artifacts are missing, proof
+ * submission is skipped gracefully with a console warning.
  */
 import { canonicalize, randomNonce, sha256Hex, sha256Prefixed } from "../attestation/hash.js";
 import { subjectIdOf } from "../attestation/types.js";

@@ -11,9 +11,11 @@ user-facing story and `docs/writeup.md` for the hackathon submission narrative.
 
 A standalone reference implementation (Apache-2.0). It binds an AI-generated
 verdict to the *specific model that produced it*: if local model weights are
-swapped, attestation fails visibly. It is **external-API-only** — it does not
-import `@lemmaoracle/sdk` or any crypto package; all proof-side work is an HTTP
-call to the Lemma workers API.
+swapped, attestation fails visibly. It performs **edge proving** — Groth16
+proof generation on-device via snarkjs (Poseidon-commitment circuit
+`claimCheckCommitmentV1`) — and submits both the document binding and the proof
+to the Lemma workers API. Runtime crypto dependencies are `@lemmaoracle/sdk`
+(`toScalar`), `poseidon-lite` (`poseidon5`), and `snarkjs` (Groth16 `fullProve`).
 
 ## Commands
 
@@ -47,9 +49,11 @@ Claim → Attest → Infer → Prove → Verdict
    `config/known-good-hashes.json`.
 2. **Infer** (`src/inference/`) — runs Gemma 4 via Ollama `/api/generate`,
    JSON-constrained output.
-3. **Prove** (`src/proof/submitToLemma`) — canonicalises a binding payload
-   (model digest + claim + output + nonce + timestamp), hashes it, and
-   registers it as a Lemma document via `POST /v1/documents`.
+3. **Prove** (`src/proof/submitToLemma`) — builds a Poseidon commitment
+   (`poseidon5`) over the attestation digest, claim hash, output hash, and
+   nonce; generates a Groth16 proof on-device via snarkjs; registers the
+   binding as a Lemma document via `POST /v1/documents`; and submits the
+   proof via `POST /v1/proofs`.
 
 ### Attribute mode (`--mode attribute`)
 
@@ -62,8 +66,9 @@ AttestAttr → VerifyAttr → ProveAttr → Verdict
    `config/known-good-attributes.json`. Ollama / Gemma 4 are **not** used.
 2. **VerifyAttr** — checks `expiresAt` from the pinned entry (and would walk
    a revocation list in a real implementation; out of scope here).
-3. **ProveAttr** (`src/proof/submitAttributeToLemma`) — same canonical-hash
-   binding as claim mode, registered with schema `attribute-check.v1`.
+3. **ProveAttr** (`src/proof/submitAttributeToLemma`) — same Poseidon-commitment
+   binding and Groth16 proving as claim mode, registered with schema
+   `passthrough-v1`.
 
 ### Both mode (`--mode both`)
 
@@ -82,8 +87,9 @@ between the two result panels.
 | `src/attestation/attribute.ts` | Attribute hash readback + verify (KYC mode). No Ollama. |
 | `src/attestation/types.ts`     | Discriminated union `AttestationResult = Model | Attribute`. |
 | `src/inference/`    | Gemma 4 claim-check prompting.                        |
-| `src/proof/`        | Payload binding + Lemma document registration (both modes). |
-| `src/sdk/`          | Thin Lemma API wrapper (fetch + types only).          |
+| `src/proof/`        | Poseidon binding + snarkjs Groth16 proving + Lemma document/proof submission (both modes). |
+| `src/sdk/`          | Thin Lemma API wrapper (fetch + types; also exports `submitProof`). |
+| `src/attestation/hash.ts`    | SHA-256, canonicalise, nonce utilities.          |
 | `scripts/tamper.ts` | WOW-demo helper — writes `.tamper-state.json` with `expectedDigestOverride` and/or `attributeHashOverride`. |
 | `config/known-good-hashes.json` | Pinned model manifest digests.            |
 | `config/known-good-attributes.json` | Pinned attribute credential hashes.   |
@@ -97,14 +103,13 @@ The Lemma workers API is the SSoT for request shapes — see
 - `POST /v1/documents` requires `docHash, schema, cid, issuerId, subjectId,
   commitments, revocation`. `commitments.scheme` must be one of `poseidon`,
   `poseidon2`, `rescue-prime`, `sha256-placeholder` (this demo uses
-  `sha256-placeholder`). Response: `{ status: "registered", docHash, ... }`.
-- `POST /v1/proofs` requires a **registered ZK circuit** and a real proof, and
-  verification is asynchronous. It is **out of scope** for this demo — the Prove
-  step only registers the binding as a document.
-- Claim mode uses `schema: "claim-check.v1"`; attribute mode uses
-  `schema: "attribute-check.v1"`. Both flows go through
-  `registerBinding()` in `src/proof/index.ts` and produce identical document
-  shapes (only `schema`, `subjectId`, and `commitments.leaves` differ).
+  `poseidon`). Response: `{ status: "registered", docHash, ... }`.
+- `POST /v1/proofs` submits a Groth16 proof generated on-device via snarkjs
+  for the `claim-check-commitment-v1` circuit. The circuit must be
+  registered with Lemma first (see `scripts/register-circuit.ts`).
+- Both claim mode and attribute mode use `schema: "passthrough-v1"`. Both
+  flows go through `registerBinding()` in `src/proof/index.ts` and produce
+  identical document shapes (only `subjectId` and `commitments.leaves` differ).
 - Base URL defaults to the public deployment (`https://workers.lemma.workers.dev`).
   Override with `LEMMA_API_BASE`. The Prove step needs `LEMMA_API_KEY`; without
   it, Attest and Infer still run and Prove reports a 401.
@@ -127,7 +132,6 @@ The Lemma workers API is the SSoT for request shapes — see
 
 ## Out of scope (see writeup)
 
-- On-device ZK proving — not implemented; proofs are delegated to Lemma.
 - Training-data provenance — attestation covers weight integrity only.
 - Source/corpus verification.
 - Revocation lists for attribute mode — `verifyAttribute()` only checks

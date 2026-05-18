@@ -17,9 +17,11 @@ This repository is the public, Apache 2.0 sibling of the longer write-up; see [`
        ↓ (verified)
 [Gemma 4 Inference] — local /api/generate, JSON-constrained output
        ↓
-[Proof Binding] — sha256(canonical(modelDigest, claimHash, outputHash, nonce, ts))
+[Proof Binding] — poseidon5(toScalar(modelDigest), toScalar(attestationToken), claimHash, outputHash, nonce)
        ↓
-[Lemma Submission] — POST /v1/documents (binding registered as a Lemma document)
+[Edge Proving] — Groth16 fullProve via snarkjs (claimCheckCommitmentV1 circuit)
+       ↓
+[Lemma Submission] — POST /v1/documents + POST /v1/proofs
        ↓
 [Verdict] — ✔ VERIFIED · ✘ TAMPERED · ! UNVERIFIED
 ```
@@ -28,11 +30,18 @@ This repository is the public, Apache 2.0 sibling of the longer write-up; see [`
 
 <iframe width="560" height="315" src="https://www.youtube.com/embed/c-i8EWVssYM?si=3GZIs2zb0qS6aD-s" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
 
-The core is **external-API-only**: it does not depend on `@lemmaoracle/sdk` or any cryptographic primitive package. All proof-side work is delegated to the Lemma workers API. The on-device pipeline only handles:
+The on-device pipeline performs **edge proving** — it generates Groth16 zero-knowledge proofs locally using `snarkjs` with a Poseidon-commitment circuit (`claimCheckCommitmentV1`), then submits both the document binding and the proof to the Lemma workers API. The runtime dependencies for the proof step are:
+
+- `@lemmaoracle/sdk` — `toScalar()` for field-element conversion,
+- `poseidon-lite` — Poseidon hash for the commitment root,
+- `snarkjs` — Groth16 `fullProve` and proof serialisation.
+
+The on-device pipeline handles:
 
 - model digest readback from Ollama,
-- claim hashing and payload canonicalisation,
-- HTTP requests to Lemma.
+- Poseidon commitment binding (not plain SHA-256),
+- Groth16 proof generation on-device,
+- document registration and proof submission to Lemma (`POST /v1/documents` + `POST /v1/proofs`).
 
 ## Quick start
 
@@ -115,6 +124,20 @@ pnpm untamper
 
 The tamper script does not touch any model weights or credentials on disk. It writes `.tamper-state.json`, which overrides the expected digest used by the attestation steps (`expectedDigestOverride` for the model, `attributeHashOverride` for the attribute). The verdict change is identical to a real supply-chain compromise — no actual model file or credential is harmed.
 
+### Circuit compilation
+
+The Groth16 proof step requires compiled circuit artifacts (`.wasm` + `.zkey`). These live under `circuits/build/` and are built from the Circom source in `circuits/`:
+
+```bash
+cd circuits && pnpm build
+```
+
+The circuit (`claimCheckCommitmentV1`) takes 5 private inputs (modelDigest, attestationToken, claimHash, outputHash, nonce) and commits them under a single Poseidon root. To register the circuit with the Lemma workers API (IPFS upload + `circuits.register`), run:
+
+```bash
+npx tsx scripts/register-circuit.ts
+```
+
 ## Configuration
 
 | Env var            | Default                              | Purpose                                    |
@@ -126,7 +149,7 @@ The tamper script does not touch any model weights or credentials on disk. It wr
 
 Copy [`.env.example`](./.env.example) to `.env` and fill in values as needed.
 
-> **API key & the Prove step.** The Prove step submits to the live Lemma workers API (`POST /v1/documents`, `/v1/proofs`), which requires `LEMMA_API_KEY`. Without a key, **Attest** and **Infer** still run and **Prove** reports a `401` — or run `pnpm dev --offline` to skip Prove entirely.
+> **API key & the Prove step.** The Prove step registers the binding as a Lemma document (`POST /v1/documents`) and submits the on-device Groth16 proof (`POST /v1/proofs`), both of which require `LEMMA_API_KEY`. Without a key, **Attest** and **Infer** still run and **Prove** reports a `401` — or run `pnpm dev --offline` to skip Prove entirely. The proof generation itself (snarkjs) runs locally and does not need the API key, but submission does.
 
 CLI flags override env vars. See `pnpm dev -- --help` for the full list.
 
@@ -135,17 +158,22 @@ CLI flags override env vars. See `pnpm dev -- --help` for the full list.
 ```
 example-claim-check/
 ├── src/
-│   ├── sdk/                # Thin Lemma API wrapper (fetch + types only)
+│   ├── sdk/                # Thin Lemma API wrapper (fetch + types; also exports submitProof)
 │   ├── ollama/             # Ollama HTTP client (/api/{tags,show,generate})
 │   ├── attestation/
 │   │   ├── verify.ts       # Model digest readback + known-good comparison
-│   │   └── attribute.ts    # Attribute hash readback + KYC verify
+│   │   ├── attribute.ts    # Attribute hash readback + KYC verify
+│   │   └── hash.ts         # SHA-256, canonicalise, nonce utilities
 │   ├── inference/          # Gemma 4 claim-check prompting (JSON output)
-│   ├── proof/              # Payload binding + Lemma submission (claim + attribute)
+│   ├── proof/              # Poseidon binding + snarkjs Groth16 proving + Lemma submission
 │   ├── ui/                 # Ink TUI components
 │   └── cli.tsx             # Entry point — --mode claim | attribute | both
+├── circuits/
+│   └── src/                # Circom source for claimCheckCommitmentV1
+│       └── build/          # Compiled .wasm + .zkey (built via pnpm build)
 ├── scripts/
-│   └── tamper.ts           # WOW demo helper — --mode model | attribute | both
+│   ├── tamper.ts           # WOW demo helper — --mode model | attribute | both
+│   └── register-circuit.ts # Upload circuit artifacts to IPFS + register with Lemma
 ├── config/
 │   ├── known-good-hashes.json       # Pinned model manifest digests
 │   └── known-good-attributes.json   # Pinned attribute credential hashes
@@ -162,7 +190,9 @@ example-claim-check/
 
 This is a hackathon-track reference. Per the writeup:
 
-- **Edge proving is implemented.** The proof step generates a Groth16 zero-knowledge proof on-device via snarkjs (Poseidon-commitment circuit `claimCheckCommitmentV1`), and submits both the binding-hash document and the proof to the Lemma workers API.
+- **Edge proving requires compiled circuit artifacts.** The proof step generates a Groth16 zero-knowledge proof on-device via snarkjs (Poseidon-commitment circuit `claimCheckCommitmentV1`). If the `circuits/build/` directory is missing, the proof submission is skipped gracefully with a console warning.
+- **Commitments use the `poseidon` scheme.** Both claim and attribute modes submit documents with `commitments.scheme: "poseidon"` and a Poseidon root — not `sha256-placeholder`.
+- **Both modes share a single schema.** Claim mode and attribute mode both use `schema: "passthrough-v1"`.
 - **Model attestation covers weight integrity only.** A model trained on biased data would still produce biased verdicts — attestation detects post-training tampering, not training-data provenance.
 - **Source verification is out of scope.** The system attests the model, not the corpus the model relies on internally.
 
