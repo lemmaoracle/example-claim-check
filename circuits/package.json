@@ -1,0 +1,12 @@
+{
+  "name": "example-claim-check-circuits",
+  "version": "1.0.0",
+  "description": "ZK Circuits for example-claim-check",
+  "scripts": {
+    "build": "bash scripts/build.sh"
+  },
+  "dependencies": {
+    "circomlib": "^2.0.5",
+    "snarkjs": "^0.7.6"
+  }
+}
