@@ -88,7 +88,7 @@ const main = (): void => {
     process.stdout.write(HELP);
     return;
   }
-  render(
+  const instance = render(
     <App
       mode={args.mode}
       initialClaim={args.claim}
@@ -100,6 +100,7 @@ const main = (): void => {
       offline={args.offline}
     />,
   );
+  instance.waitUntilExit().then(() => process.exit(0));
 };
 
 main();
